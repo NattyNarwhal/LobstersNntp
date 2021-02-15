@@ -124,6 +124,7 @@ defmodule LobstersNntp.NntpSession do
           :article ->
             send_line(socket, "220 #{article_number} #{message_id}")
             Enum.map(header, fn line -> send_line(socket, line) end)
+            send_line(socket, "") # spacing between header and body
             Enum.map(body, fn line -> send_line(socket, line) end)
             send_line(socket, ".")
           :headers ->
