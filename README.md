@@ -10,6 +10,19 @@ The license is the same as Lobsters itself (3-clause BSD).
 This was inspired by Tavis Ormandy's [nntpit](https://github.com/taviso/nntpit).
 I had this idea for a while, but nntpit made it look realistic.
 
+## Running
+
+Make sure you have Elixir installed. As of right now, there is no configuration.
+The server listens on port 1119. The client information doesn't matter, since
+you can't post.
+
+```
+$ mix deps.get # get dependencies
+$ iex -S mix # start application with REPL attached (compiles if needed)
+# Unfortunately you need to manually stir the pot (no background job yet)
+iex> LobstersNntp.LobstersClient.update_articles
+```
+
 ## Tested clients
 
 Fair warning: Most of the clients I tested are GUI ones. I suspect unlike a lot
