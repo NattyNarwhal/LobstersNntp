@@ -172,6 +172,7 @@ defmodule LobstersNntp.NntpSession do
         {:noreply, state}
       "QUIT" ->
         Logger.info("[TCP] Exiting from QUIT")
+        send_line(socket, "205 bye")
         :gen_tcp.close(socket)
         {:noreply, state}
       _ ->
