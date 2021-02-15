@@ -113,13 +113,13 @@ defmodule LobstersNntp.MboxTransform do
   def transform(%LobstersNntp.LobstersMnesia.Story{} = story) do
     headers = create_headers(story)
     body = create_body(story)
-    headers ++ [""] ++ body
+    {headers, body}
   end
 
   def transform(%LobstersNntp.LobstersMnesia.Comment{} = comment) do
     headers = create_headers(comment)
     body = create_body(comment)
-    headers ++ [""] ++ body
+    {headers, body}
   end
 
   def transform(nil), do: nil

@@ -89,7 +89,7 @@ defmodule LobstersNntp.NntpSession do
     state
   end
 
-  defp nntp_article(socket, state, article) do
+  defp nntp_article(socket, state, article, parts) do
     args = calculate_xover_range(article)
     result = case args do
       {type, _id} when type in [:story, :comment] ->
@@ -111,23 +111,32 @@ defmodule LobstersNntp.NntpSession do
             send_line(socket, "430 No article with that message-id")
         end
         state
-      lines when is_list(lines) ->
-        case args do
-          {:article, article} ->
-            # Oops, we should actually return structured data from mbox trans,
-            # then actually convert THAT to Mbox
-            message_id = lines
-                         |> Enum.find_value(fn
-                           "Message-ID: " <> id -> id;
-                           _ -> nil end)
-            send_line(socket, "220 #{article} #{message_id}")
-          {:comment, id} ->
-            send_line(socket, "220 0 <c_#{id}@#{Application.get_env(:lobsters_nntp, :domain)}>")
-          {:story, id} ->
-            send_line(socket, "220 0 <s_#{id}@#{Application.get_env(:lobsters_nntp, :domain)}>")
+      {header, body} ->
+        message_id = header
+                     |> Enum.find_value(fn
+                       "Message-ID: " <> id -> id;
+                       _ -> nil end)
+        article_number = case args do
+          {:article, article} -> article
+          _ -> 0
         end
-        Enum.map(lines, fn line -> send_line(socket, line) end)
-        send_line(socket, ".")
+        case parts do
+          :article ->
+            send_line(socket, "220 #{article_number} #{message_id}")
+            Enum.map(header, fn line -> send_line(socket, line) end)
+            Enum.map(body, fn line -> send_line(socket, line) end)
+            send_line(socket, ".")
+          :headers ->
+            send_line(socket, "221 #{article_number} #{message_id}")
+            Enum.map(header, fn line -> send_line(socket, line) end)
+            send_line(socket, ".")
+          :body ->
+            send_line(socket, "222 #{article_number} #{message_id}")
+            Enum.map(body, fn line -> send_line(socket, line) end)
+            send_line(socket, ".")
+          :stat ->
+            send_line(socket, "223 #{article_number} #{message_id}")
+        end
         Map.put(state, :selected_article, args)
     end
   end
@@ -155,7 +164,13 @@ defmodule LobstersNntp.NntpSession do
       "OVER " <> range ->
         {:noreply, nntp_xover(socket, state, range)}
       "ARTICLE " <> article ->
-        {:noreply, nntp_article(socket, state, article)}
+        {:noreply, nntp_article(socket, state, article, :article)}
+      "HEAD " <> article ->
+        {:noreply, nntp_article(socket, state, article, :headers)}
+      "BODY " <> article ->
+        {:noreply, nntp_article(socket, state, article, :body)}
+      "STAT " <> article ->
+        {:noreply, nntp_article(socket, state, article, :stat)}
       "LIST" ->
         {:noreply, nntp_list(socket, state)}
       "NEWGROUPS " <> _newgroups_args ->
