@@ -18,6 +18,7 @@ you can't post.
 
 ```
 $ mix deps.get # get dependencies
+$ mix amnesia.create -d LobstersNntp.LobstersMnesia --disk # create tables
 $ iex -S mix # start application with REPL attached (compiles if needed)
 # Unfortunately you need to manually stir the pot (no background job yet)
 iex> LobstersNntp.LobstersClient.update_articles
