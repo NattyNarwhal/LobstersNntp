@@ -43,7 +43,6 @@ Feel free to try more!
 
 * More DRY
 * Should offer plain text; probably use MIME to staple them together
-* Time zone, port, Lobsters instance should all be configurable
 * Support non-XOVER commands for fetching headers
 
 ## How does this work?

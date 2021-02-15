@@ -10,11 +10,12 @@ defmodule LobstersNntp.LobstersClient do
   require Exquisite
   use Amnesia
 
-  # XXX: Configurable?
-  @newest_endpoint "https://lobste.rs/newest.json"
+  defp newest_endpoint() do
+    "https://#{Application.get_env(:lobsters_nntp, :domain)}/newest.json"
+  end
 
   defp story_endpoint(short_id) do
-    "https://lobste.rs/s/#{short_id}.json"
+    "https://#{Application.get_env(:lobsters_nntp, :domain)}/s/#{short_id}.json"
   end
 
   def start_link(args \\ []) do
@@ -147,7 +148,7 @@ defmodule LobstersNntp.LobstersClient do
   def handle_cast(:update_articles, state) do
     Logger.info("[CLI] Updating articles")
     {:ok, %HTTPoison.Response{status_code: 200, body: body}} =
-      HTTPoison.get(@newest_endpoint)
+      HTTPoison.get(newest_endpoint())
     {:ok, decoded_stories} = Poison.decode(body)
     comments = decoded_stories
                |> Enum.map(&get_comments/1)

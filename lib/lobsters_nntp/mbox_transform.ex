@@ -25,7 +25,7 @@ defmodule LobstersNntp.MboxTransform do
            |> Time.truncate(:second)
            |> Time.to_string
     # the TZ is wrong because NDT. lobsters runs central time
-    "#{date} #{month} #{year} #{time} CST"
+    "#{date} #{month} #{year} #{time} #{Application.get_env(:lobsters_nntp, :tz)}"
   end
 
   defp escape_body(body_string) do
@@ -53,7 +53,7 @@ defmodule LobstersNntp.MboxTransform do
   end
 
   defp from(%{username: username}) do
-    "\"#{username}\" <#{username}@lobste.rs>"
+    "\"#{username}\" <#{username}@#{Application.get_env(:lobsters_nntp, :domain)}>"
   end
 
   def create_headers(%LobstersNntp.LobstersMnesia.Story{} = story) do
@@ -64,10 +64,10 @@ defmodule LobstersNntp.MboxTransform do
       "Subject: #{subject(story)}",
       "From: #{from(story)}",
       "Date: #{date_format(story.created_at)}",
-      "Message-ID: <s_#{story.id}@lobste.rs>",
+      "Message-ID: <s_#{story.id}@#{Application.get_env(:lobsters_nntp, :domain)}>",
       "Newsgroups: lobsters, #{fake_newsgroups}",
       "Path: lobsters!nntp",
-      "X-Lobsters: \"https://lobste.rs/s/#{story.id}\"",
+      "X-Lobsters: \"https://#{Application.get_env(:lobsters_nntp, :domain)}/s/#{story.id}\"",
       "X-Lobsters-Karma: #{story.karma}",
       "Content-Type: text/html; charset=UTF-8"
     ]
@@ -80,11 +80,11 @@ defmodule LobstersNntp.MboxTransform do
       "Subject: #{subject(comment)}",
       "From: #{from(comment)}",
       "Date: #{date_format(comment.created_at)}",
-      "Message-ID: <c_#{comment.id}@lobste.rs>",
-      "References: <#{reference_id}@lobste.rs>",
+      "Message-ID: <c_#{comment.id}@#{Application.get_env(:lobsters_nntp, :domain)}>",
+      "References: <#{reference_id}@#{Application.get_env(:lobsters_nntp, :domain)}>",
       "Newsgroups: lobsters",
       "Path: lobsters!nntp",
-      "X-Lobsters: \"https://lobste.rs/c/#{comment.id}\"",
+      "X-Lobsters: \"https://#{Application.get_env(:lobsters_nntp, :domain)}/c/#{comment.id}\"",
       "X-Lobsters-Karma: #{comment.karma}",
       "Content-Type: text/html; charset=UTF-8"
     ]
@@ -141,7 +141,7 @@ defmodule LobstersNntp.MboxTransform do
       "#{subject(story)}",
       "#{from(story)}",
       "#{date_format(story.created_at)}",
-      "<s_#{story.id}@lobste.rs>",
+      "<s_#{story.id}@#{Application.get_env(:lobsters_nntp, :domain)}>",
       "",
       "#{bytes}",
       "#{lines}"
@@ -161,8 +161,8 @@ defmodule LobstersNntp.MboxTransform do
       "#{subject(comment)}",
       "#{from(comment)}",
       "#{date_format(comment.created_at)}",
-      "<c_#{comment.id}@lobste.rs>",
-      "<#{reference_id}@lobste.rs>",
+      "<c_#{comment.id}@#{Application.get_env(:lobsters_nntp, :domain)}>",
+      "<#{reference_id}@#{Application.get_env(:lobsters_nntp, :domain)}>",
       "#{bytes}",
       "#{lines}"
     ] |> Enum.join("\t")

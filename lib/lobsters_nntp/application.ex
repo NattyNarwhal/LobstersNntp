@@ -9,8 +9,7 @@ defmodule LobstersNntp.Application do
     children = [
       {LobstersNntp.LobstersClient, %{}},
       {LobstersNntp.MboxWorker, %{}},
-      # Starts a worker by calling: LobstersNntp.Worker.start_link(arg)
-      {LobstersNntp.NntpServer, %{port: 1119}},
+      {LobstersNntp.NntpServer, %{port: Application.get_env(:lobsters_nntp, :port)}},
       # This handles the clients for the server
       {DynamicSupervisor, strategy: :one_for_one, name: LobstersNntp.NntpSessionSupervisor}
     ]

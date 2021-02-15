@@ -30,11 +30,11 @@ defmodule LobstersNntp.NntpSession do
   end
 
   defp calculate_xover_range("<c_" <> rest) do
-    {:comment, String.replace_suffix(rest, "@lobste.rs>", "")}
+    {:comment, String.replace_suffix(rest, "@#{Application.get_env(:lobsters_nntp, :domain)}>", "")}
   end
 
   defp calculate_xover_range("<s_" <> rest) do
-    {:story, String.replace_suffix(rest, "@lobste.rs>", "")}
+    {:story, String.replace_suffix(rest, "@#{Application.get_env(:lobsters_nntp, :domain)}>", "")}
   end
 
   defp calculate_xover_range(rest) do
@@ -122,9 +122,9 @@ defmodule LobstersNntp.NntpSession do
                            _ -> nil end)
             send_line(socket, "220 #{article} #{message_id}")
           {:comment, id} ->
-            send_line(socket, "220 0 <c_#{id}@lobste.rs>")
+            send_line(socket, "220 0 <c_#{id}@#{Application.get_env(:lobsters_nntp, :domain)}>")
           {:story, id} ->
-            send_line(socket, "220 0 <s_#{id}@lobste.rs>")
+            send_line(socket, "220 0 <s_#{id}@#{Application.get_env(:lobsters_nntp, :domain)}>")
         end
         Enum.map(lines, fn line -> send_line(socket, line) end)
         send_line(socket, ".")
