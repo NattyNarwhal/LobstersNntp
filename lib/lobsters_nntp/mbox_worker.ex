@@ -75,18 +75,18 @@ defmodule LobstersNntp.MboxWorker do
     Logger.info("[WRK] Begin ARTICLE for comment #{id}")
     [article | _] = Amnesia.transaction do
       LobstersNntp.LobstersMnesia.Comment.read(id)
+      |> Enum.map(&LobstersNntp.MboxTransform.transform/1)
     end
-    transformed = LobstersNntp.MboxTransform.transform(article)
-    {:reply, transformed, state}
+    {:reply, article, state}
   end
 
   def handle_call({:article, :story, id}, _pid, state) do
     Logger.info("[WRK] Begin ARTICLE for story #{id}")
     [article | _] = Amnesia.transaction do
       LobstersNntp.LobstersMnesia.Story.read(id)
+      |> Enum.map(&LobstersNntp.MboxTransform.transform/1)
     end
-    transformed = LobstersNntp.MboxTransform.transform(article)
-    {:reply, transformed, state}
+    {:reply, article, state}
   end
 
   def handle_call({:article, :article, id}, _pid, state) do
@@ -98,9 +98,9 @@ defmodule LobstersNntp.MboxWorker do
         %LobstersNntp.LobstersMnesia.Article{} = article_obj ->
           LobstersNntp.LobstersMnesia.Article.get_original(article_obj)
       end
+      |> Enum.map(&LobstersNntp.MboxTransform.transform/1)
     end
-    transformed = LobstersNntp.MboxTransform.transform(article)
-    {:reply, transformed, state}
+    {:reply, article, state}
   end
 
   def xover({type, story_id}) when type in [:story, :comment], do: GenServer.call(__MODULE__, {:xover, type, story_id})

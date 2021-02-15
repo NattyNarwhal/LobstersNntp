@@ -49,7 +49,11 @@ defmodule LobstersNntp.MboxTransform do
   end
 
   def subject(%LobstersNntp.LobstersMnesia.Comment{story_id: story_id}) do
-    "Reply to #{story_id}"
+    # This is probably better done in the worker, but for now, everything
+    # calling this is done in the Mnesia transaction
+    [%LobstersNntp.LobstersMnesia.Story{title: title} | _] =
+      LobstersNntp.LobstersMnesia.Story.read(story_id)
+    "Re: #{title}"
   end
 
   defp from(%{username: username}) do
