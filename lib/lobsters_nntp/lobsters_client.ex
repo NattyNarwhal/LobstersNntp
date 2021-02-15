@@ -22,7 +22,8 @@ defmodule LobstersNntp.LobstersClient do
   end
 
   def init(args) do
-    {:ok, args}
+    timer = schedule_update()
+    {:ok, Map.put(args, :timer, timer)}
   end
 
   defp transform_story(story_map) do
@@ -163,6 +164,16 @@ defmodule LobstersNntp.LobstersClient do
     {:noreply, state}
   end
 
+  def handle_info(:update_articles, state) do
+    # because the scheduled job doesn't do GenServer stuff
+    timer = schedule_update()
+    {:noreply, Map.put(state, :timer, timer)}
+  end
+
+  defp schedule_update do
+    # One hour
+    Process.send_after(self(), :update_articles, 1 * 60 * 60 * 1000)
+  end
 
   def update_articles, do: GenServer.cast(__MODULE__, :update_articles)
 end
