@@ -10,6 +10,13 @@ The license is the same as Lobsters itself (3-clause BSD).
 This was inspired by Tavis Ormandy's [nntpit](https://github.com/taviso/nntpit).
 I had this idea for a while, but nntpit made it look realistic.
 
+## Public instance
+
+**If you don't want to set it up yourself**, try the public instance, available
+at [`nntp.scrollwheel.ca`](nntp://nntp.scrollwheel.ca/lobste.rs).
+
+I make no guarantees as to of its availability. Caveat emptor.
+
 ## Running
 
 Make sure you have Elixir installed. As of right now, there is no configuration.
