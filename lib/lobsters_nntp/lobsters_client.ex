@@ -45,11 +45,12 @@ defmodule LobstersNntp.LobstersClient do
 
   defp insert_story(story) do
     Logger.info("[CLI] Inserting story #{Map.get(story, :id)}")
-    case LobstersNntp.LobstersMnesia.Story.read(story) do
+    case LobstersNntp.LobstersMnesia.Story.read(story.id) do
       nil -> nil
-      %LobstersNntp.LobstersMnesia.Story{} ->
+      # There could be multiple, we just care if the head matches
+      [%LobstersNntp.LobstersMnesia.Story{} | _] ->
         # Avoid dupes
-        LobstersNntp.LobstersMnesia.Story.delete(story)
+        LobstersNntp.LobstersMnesia.Story.delete(story.id)
     end
     LobstersNntp.LobstersMnesia.Story.write(story)
     # only create new articles if the object didn't exist already
@@ -88,11 +89,11 @@ defmodule LobstersNntp.LobstersClient do
 
   defp insert_comment(comment) do
     Logger.info("[CLI] Transforming comment #{Map.get(comment, :id)}")
-    case LobstersNntp.LobstersMnesia.Comment.read(comment) do
+    case LobstersNntp.LobstersMnesia.Comment.read(comment.id) do
       nil -> nil
-      %LobstersNntp.LobstersMnesia.Comment{} ->
+      [%LobstersNntp.LobstersMnesia.Comment{} | _] ->
         # Avoid dupes
-        LobstersNntp.LobstersMnesia.Comment.delete(comment)
+        LobstersNntp.LobstersMnesia.Comment.delete(comment.id)
     end
     LobstersNntp.LobstersMnesia.Comment.write(comment)
     # only create new articles if the object didn't exist already
