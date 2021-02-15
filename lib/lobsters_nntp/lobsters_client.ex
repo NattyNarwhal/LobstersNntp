@@ -166,6 +166,7 @@ defmodule LobstersNntp.LobstersClient do
   end
 
   def handle_info(:update_articles, state) do
+    update_articles()
     # because the scheduled job doesn't do GenServer stuff
     timer = schedule_update()
     {:noreply, Map.put(state, :timer, timer)}
