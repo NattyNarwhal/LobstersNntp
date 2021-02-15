@@ -31,7 +31,7 @@ defmodule LobstersNntp.MboxTransform do
   defp qp_subject(subject) do
     [encoded] = :lobsters_nntp_mime.encode_quoted_printable(subject)
     # remove whitespace that can disrupt parsing
-    cleaned = String.replace(subject, ~r{[\t\r\n]}, " ")
+    cleaned = String.replace(encoded, ~r{[\t\r\n]}, " ")
     # Use ?B? for Base64
     "=?UTF-8?Q?#{cleaned}?="
   end
@@ -47,17 +47,14 @@ defmodule LobstersNntp.MboxTransform do
     # TODO: We should instead of stripping, do some parsing.
     # (Unless Peter gives us raw Markdown... hmmm...)
     stripped = HtmlSanitizeEx.strip_tags(without_boundary)
-               |> IO.inspect
     # Make this QP
     [encoded] = :lobsters_nntp_mime.encode_quoted_printable(stripped)
-                |> IO.inspect
     encoded
   end
 
   def html_to_encoded_html(html, strip_boundary) do
     without_boundary = String.replace(html, strip_boundary, "A" <> strip_boundary)
     [encoded] = :lobsters_nntp_mime.encode_quoted_printable(without_boundary)
-                |> IO.inspect
     encoded
   end
 
@@ -104,7 +101,11 @@ defmodule LobstersNntp.MboxTransform do
     "\"#{username}\" <#{username}@#{Application.get_env(:lobsters_nntp, :domain)}>"
   end
 
-  def create_headers(%LobstersNntp.LobstersMnesia.Story{} = story) do
+  defp encoding(:multipart), do: "multipart/alternative; boundary=__LobstersNntpBoundary"
+  defp encoding(:plain), do: "text/plain; charset=\"UTF-8\""
+  defp encoding(:html), do: "text/html; charset=\"UTF-8\""
+
+  def create_headers(%LobstersNntp.LobstersMnesia.Story{} = story, options) do
     fake_newsgroups = story.tags
                       |> Enum.map(fn tag -> "lobsters.tag.#{tag}" end)
                       |> Enum.join(", ")
@@ -117,11 +118,11 @@ defmodule LobstersNntp.MboxTransform do
       "Path: lobsters!nntp",
       "X-Lobsters: \"https://#{Application.get_env(:lobsters_nntp, :domain)}/s/#{story.id}\"",
       "X-Lobsters-Karma: #{story.karma}",
-      "Content-Type: multipart/alternative; boundary=__LobstersNntpBoundary"
+      "Content-Type: #{encoding(options.content_type)}"
     ]
   end
 
-  def create_headers(%LobstersNntp.LobstersMnesia.Comment{} = comment) do
+  def create_headers(%LobstersNntp.LobstersMnesia.Comment{} = comment, options) do
     reference_id = reference(comment)
     [
       "Subject: #{subject(comment)}",
@@ -133,38 +134,57 @@ defmodule LobstersNntp.MboxTransform do
       "Path: lobsters!nntp",
       "X-Lobsters: \"https://#{Application.get_env(:lobsters_nntp, :domain)}/c/#{comment.id}\"",
       "X-Lobsters-Karma: #{comment.karma}",
-      "Content-Type: multipart/alternative; boundary=__LobstersNntpBoundary"
+      "Content-Type: #{encoding(options.content_type)}"
     ]
   end
 
-  def create_body(%LobstersNntp.LobstersMnesia.Story{} = story) do
+  defp transform_text(html_text, options) do
+    # XXX: Should we be using QP for the non-multipart encodings?
+    case options.content_type do
+      :multipart ->
+        multipart_from_html(html_text)
+      :html ->
+        html_text
+      :plain ->
+        HtmlSanitizeEx.strip_tags(html_text)
+    end
+    |> body_to_lines
+  end
+
+  def create_body(%LobstersNntp.LobstersMnesia.Story{} = story, options) do
     # XXX: is some of the metadata (like tags) better in the header?
     html_text = case story.url do
       "" -> ""
       url -> "<p>URL: <a href=\"#{url}\">#{url}</a></p>\r\n\r\n"
     end <> story.text
-    multipart = multipart_from_html(html_text)
-    body_to_lines(multipart)
+    transform_text(html_text, options)
   end
 
-  def create_body(%LobstersNntp.LobstersMnesia.Comment{} = comment) do
+  def create_body(%LobstersNntp.LobstersMnesia.Comment{} = comment, options) do
     html_text = comment.text
-    multipart = multipart_from_html(html_text)
-    body_to_lines(multipart)
+    transform_text(html_text, options)
   end
 
   # Each string in the list is a line
-  def transform(%LobstersNntp.LobstersMnesia.Story{} = story) do
-    headers = create_headers(story)
-    body = create_body(story)
+  def transform(object, options \\ %{})
+
+  def transform(%LobstersNntp.LobstersMnesia.Story{} = story, options) do
+    merged_options = Map.merge(%{
+      content_type: :multipart
+    }, options)
+    headers = create_headers(story, merged_options)
+    body = create_body(story, merged_options)
     {headers, body}
   end
 
-  def transform(%LobstersNntp.LobstersMnesia.Comment{} = comment) do
-    headers = create_headers(comment)
-    body = create_body(comment)
+  def transform(%LobstersNntp.LobstersMnesia.Comment{} = comment, options) do
+    merged_options = Map.merge(%{
+      content_type: :multipart
+    }, options)
+    headers = create_headers(comment, merged_options)
+    body = create_body(comment, merged_options)
     {headers, body}
   end
 
-  def transform(nil), do: nil
+  def transform(nil, _options), do: nil
 end
