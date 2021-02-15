@@ -28,12 +28,56 @@ defmodule LobstersNntp.MboxTransform do
     "#{date} #{month} #{year} #{time} #{Application.get_env(:lobsters_nntp, :tz)}"
   end
 
-  defp escape_body(body_string) do
-    # XXX: Word wrap to 72 or something, and UTF-8ification
-    # For now, just make sure any lines are separate,
-    # and there is no termination character
+  defp qp_subject(subject) do
+    [encoded] = :lobsters_nntp_mime.encode_quoted_printable(subject)
+    # remove whitespace that can disrupt parsing
+    cleaned = String.replace(subject, ~r{[\t\r\n]}, " ")
+    # Use ?B? for Base64
+    "=?UTF-8?Q?#{cleaned}?="
+  end
+
+  defp body_to_lines(body_string) do
     String.split(body_string, ~r{\r?\n})
     |> Enum.map(fn "." -> ".."; x -> x end)
+  end
+
+  def html_to_encoded_text(html, strip_boundary) do
+    # XXX: hacky
+    without_boundary = String.replace(html, strip_boundary, "A" <> strip_boundary)
+    # TODO: We should instead of stripping, do some parsing.
+    # (Unless Peter gives us raw Markdown... hmmm...)
+    stripped = HtmlSanitizeEx.strip_tags(without_boundary)
+               |> IO.inspect
+    # Make this QP
+    [encoded] = :lobsters_nntp_mime.encode_quoted_printable(stripped)
+                |> IO.inspect
+    encoded
+  end
+
+  def html_to_encoded_html(html, strip_boundary) do
+    without_boundary = String.replace(html, strip_boundary, "A" <> strip_boundary)
+    [encoded] = :lobsters_nntp_mime.encode_quoted_printable(without_boundary)
+                |> IO.inspect
+    encoded
+  end
+
+  def multipart_from_html(text, boundary \\ "__LobstersNntpBoundary") do
+    plain = html_to_encoded_text(text, boundary)
+    html = html_to_encoded_html(text, boundary)
+    """
+    --#{boundary}
+    Content-Type: text/plain; charset="UTF-8"
+    Content-Transfer-Encoding: quoted-printable
+
+    #{plain}
+    
+    
+    --#{boundary}
+    Content-Type: text/html; charset="UTF-8"
+    Content-Transfer-Encoding: quoted-printable
+
+    #{html}
+    """
   end
 
   def reference(%LobstersNntp.LobstersMnesia.Comment{reply_to: nil, story_id: story_id}) do
@@ -45,7 +89,7 @@ defmodule LobstersNntp.MboxTransform do
   end
 
   def subject(%LobstersNntp.LobstersMnesia.Story{title: title}) do
-    title
+    title |> qp_subject
   end
 
   def subject(%LobstersNntp.LobstersMnesia.Comment{story_id: story_id}) do
@@ -53,7 +97,7 @@ defmodule LobstersNntp.MboxTransform do
     # calling this is done in the Mnesia transaction
     [%LobstersNntp.LobstersMnesia.Story{title: title} | _] =
       LobstersNntp.LobstersMnesia.Story.read(story_id)
-    "Re: #{title}"
+    "Re: #{title}" |> qp_subject
   end
 
   defp from(%{username: username}) do
@@ -73,14 +117,13 @@ defmodule LobstersNntp.MboxTransform do
       "Path: lobsters!nntp",
       "X-Lobsters: \"https://#{Application.get_env(:lobsters_nntp, :domain)}/s/#{story.id}\"",
       "X-Lobsters-Karma: #{story.karma}",
-      "Content-Type: text/html; charset=UTF-8"
+      "Content-Type: multipart/alternative; boundary=__LobstersNntpBoundary"
     ]
   end
 
   def create_headers(%LobstersNntp.LobstersMnesia.Comment{} = comment) do
     reference_id = reference(comment)
     [
-      # XXX: Store the story title (or fetch it)
       "Subject: #{subject(comment)}",
       "From: #{from(comment)}",
       "Date: #{date_format(comment.created_at)}",
@@ -90,27 +133,24 @@ defmodule LobstersNntp.MboxTransform do
       "Path: lobsters!nntp",
       "X-Lobsters: \"https://#{Application.get_env(:lobsters_nntp, :domain)}/c/#{comment.id}\"",
       "X-Lobsters-Karma: #{comment.karma}",
-      "Content-Type: text/html; charset=UTF-8"
+      "Content-Type: multipart/alternative; boundary=__LobstersNntpBoundary"
     ]
   end
 
   def create_body(%LobstersNntp.LobstersMnesia.Story{} = story) do
     # XXX: is some of the metadata (like tags) better in the header?
-    case story.url do
-      "" ->
-        []
-      url ->
-        ["URL: #{url}", ""]
-    end ++ case story.text do
-      "" ->
-        []
-      text ->
-        escape_body(text) ++ [""]
-    end
+    html_text = case story.url do
+      "" -> ""
+      url -> "<p>URL: <a href=\"#{url}\">#{url}</a></p>\r\n\r\n"
+    end <> story.text
+    multipart = multipart_from_html(html_text)
+    body_to_lines(multipart)
   end
 
   def create_body(%LobstersNntp.LobstersMnesia.Comment{} = comment) do
-    escape_body(comment.text)
+    html_text = comment.text
+    multipart = multipart_from_html(html_text)
+    body_to_lines(multipart)
   end
 
   # Each string in the list is a line
