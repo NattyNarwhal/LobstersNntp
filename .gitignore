@@ -24,3 +24,6 @@ lobsters_nntp-*.tar
 
 # Mnesia datastore
 /Mnesia.*/
+
+# Vim droppings
+*.swp
