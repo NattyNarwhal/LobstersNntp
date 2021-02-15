@@ -127,48 +127,4 @@ defmodule LobstersNntp.MboxTransform do
   end
 
   def transform(nil), do: nil
-
-  # art_num|subj|from|date|id|ref|bytes|lines
-  # forward declare to squelch warning
-  def xover(object, article_number \\ 0)
-
-  def xover(%LobstersNntp.LobstersMnesia.Story{} = story, article_number) do
-    Logger.info("[MBX] XOVER for article #{article_number}")
-    # bytes/lines are dumb
-    body = create_body(story)
-    body_text = body
-                |> Enum.join("\r\n")
-    lines = Enum.count(body)
-    bytes = byte_size(body_text)
-    [
-      "#{article_number}",
-      "#{subject(story)}",
-      "#{from(story)}",
-      "#{date_format(story.created_at)}",
-      "<s_#{story.id}@#{Application.get_env(:lobsters_nntp, :domain)}>",
-      "",
-      "#{bytes}",
-      "#{lines}"
-    ] |> Enum.join("\t")
-  end
-
-  def xover(%LobstersNntp.LobstersMnesia.Comment{} = comment, article_number) do
-    Logger.info("[MBX] XOVER for article #{article_number}")
-    reference_id = reference(comment)
-    body = create_body(comment)
-    body_text = body
-                |> Enum.join("\r\n")
-    lines = Enum.count(body)
-    bytes = byte_size(body_text)
-    [
-      "#{article_number}",
-      "#{subject(comment)}",
-      "#{from(comment)}",
-      "#{date_format(comment.created_at)}",
-      "<c_#{comment.id}@#{Application.get_env(:lobsters_nntp, :domain)}>",
-      "<#{reference_id}@#{Application.get_env(:lobsters_nntp, :domain)}>",
-      "#{bytes}",
-      "#{lines}"
-    ] |> Enum.join("\t")
-  end
 end

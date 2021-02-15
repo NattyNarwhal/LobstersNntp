@@ -13,6 +13,21 @@ defmodule LobstersNntp.NntpSession do
   end
 
   # NNTP protocol
+  defp extract_header_items(headers, header) do
+    headers
+    |> Enum.filter(fn x -> String.starts_with?(x, header) end)
+    |> Enum.map(fn x -> String.replace_prefix(x, header <> ": ", "") end)
+  end
+
+  defp extract_header_item(headers, header) do
+    case extract_header_items(headers, header) do
+      [] ->
+        nil
+      [first | _] when is_binary(first) ->
+        first
+    end
+  end
+
   defp water_marks() do
     count = LobstersNntp.LobstersMnesia.Article.count()
     high = count
@@ -29,15 +44,15 @@ defmodule LobstersNntp.NntpSession do
     state
   end
 
-  defp calculate_xover_range("<c_" <> rest) do
+  defp calculate_range("<c_" <> rest) do
     {:comment, String.replace_suffix(rest, "@#{Application.get_env(:lobsters_nntp, :domain)}>", "")}
   end
 
-  defp calculate_xover_range("<s_" <> rest) do
+  defp calculate_range("<s_" <> rest) do
     {:story, String.replace_suffix(rest, "@#{Application.get_env(:lobsters_nntp, :domain)}>", "")}
   end
 
-  defp calculate_xover_range(rest) do
+  defp calculate_range(rest) do
     case String.split(rest, "-") do
       [first, ""] ->
         {int, _} = Integer.parse(first)
@@ -54,34 +69,53 @@ defmodule LobstersNntp.NntpSession do
     end
   end
 
+  # art_num|subj|from|date|id|ref|bytes|lines
+  defp nntp_xover_item({article_number, head, body}) do
+    body_text = Enum.join(body, "\r\n")
+    lines = Enum.count(body)
+    bytes = byte_size(body_text)
+    [
+      "#{article_number}",
+      "#{extract_header_item(head, "Subject")}",
+      "#{extract_header_item(head, "From")}",
+      "#{extract_header_item(head, "Date")}",
+      "#{extract_header_item(head, "Message-ID")}",
+      "#{extract_header_item(head, "References")}",
+      "#{bytes}",
+      "#{lines}"
+    ] |> Enum.join("\t")
+  end
+
   defp nntp_xover_range(socket, xover_arg) do
-    case LobstersNntp.MboxWorker.xover(xover_arg) do
+    case LobstersNntp.MboxWorker.articles(xover_arg) do
       nil ->
         send_line(socket, "423 Not in range")
-      xover_lines ->
+      articles ->
         send_line(socket, "224 Overview follows")
-        Enum.map(xover_lines, fn line -> send_line(socket, line) end)
+        articles
+        |> Enum.map(&nntp_xover_item/1)
+        |> Enum.map(fn line -> send_line(socket, line) end)
         send_line(socket, ".")
     end
   end
 
   defp nntp_xover(socket, state, range) do
     # 412 if !selected (only if range isn't an article id)
-    case calculate_xover_range(range) do
+    case calculate_range(range) do
       {type, _id} = xover_arg when type in [:story, :comment] ->
-        case LobstersNntp.MboxWorker.xover(xover_arg) do
+        case LobstersNntp.MboxWorker.article(xover_arg) do
           nil ->
             send_line(socket, "430 No such comment")
-          xover_line ->
+          {head, body} ->
             send_line(socket, "224 Overview follows")
-            send_line(socket, xover_line)
+            send_line(socket, nntp_xover_item({0, head, body}))
             send_line(socket, ".")
         end
+      {:article, article} ->
+        nntp_xover_range(socket, {:articles_from_to, article, article})
       {:articles_from, _from} = xover_arg ->
         nntp_xover_range(socket, xover_arg)
       {:articles_from_to, _from, _to} = xover_arg ->
-        nntp_xover_range(socket, xover_arg)
-      {:article, _article} = xover_arg ->
         nntp_xover_range(socket, xover_arg)
       _ ->
         send_line(socket, "501 Invalid range")
@@ -90,7 +124,7 @@ defmodule LobstersNntp.NntpSession do
   end
 
   defp nntp_article(socket, state, article, parts) do
-    args = calculate_xover_range(article)
+    args = calculate_range(article)
     result = case args do
       {type, _id} when type in [:story, :comment] ->
         LobstersNntp.MboxWorker.article(args)
@@ -112,10 +146,7 @@ defmodule LobstersNntp.NntpSession do
         end
         state
       {header, body} ->
-        message_id = header
-                     |> Enum.find_value(fn
-                       "Message-ID: " <> id -> id;
-                       _ -> nil end)
+        message_id = extract_header_item(header, "Message-ID")
         article_number = case args do
           {:article, article} -> article
           _ -> 0

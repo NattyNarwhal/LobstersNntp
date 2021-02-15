@@ -19,35 +19,9 @@ defmodule LobstersNntp.MboxWorker do
     {:ok, args}
   end
 
-  def handle_call({:xover, :story, story_id}, _pid, state) do
-    story = Amnesia.transaction do
-      LobstersNntp.LobstersMnesia.Story.read(story_id)
-    end
-    story_xover = case story do
-      nil ->
-        nil
-      _story ->
-        LobstersNntp.MboxTransform.xover(story)
-    end
-    {:reply, story_xover, state}
-  end
-
-  def handle_call({:xover, :comment, comment_id}, _pid, state) do
-    story = Amnesia.transaction do
-      LobstersNntp.LobstersMnesia.Comment.read(comment_id)
-    end
-    story_xover = case story do
-      nil ->
-        nil
-      _story ->
-        LobstersNntp.MboxTransform.xover(story)
-    end
-    {:reply, story_xover, state}
-  end
-
-  def handle_call({:xover, :articles_from_to, from, to}, _pid, state) do
-    Logger.info("[WRK] Begin XOVER from #{from} to #{to}")
-    xovers = Amnesia.transaction do
+  def handle_call({:articles_from_to, from, to}, _pid, state) do
+    Logger.info("[WRK] Begin ARTICLE from #{from} to #{to}")
+    articles = Amnesia.transaction do
       case LobstersNntp.LobstersMnesia.Article.where(id >= from and id <= to) do
         nil ->
           Logger.info("[WRK] No articles")
@@ -57,18 +31,18 @@ defmodule LobstersNntp.MboxWorker do
           Enum.map(articles, fn
             {_, article_number, id, :story} ->
               Logger.info("[WRK] Article number #{article_number} corresponds to story #{id}")
-              # Why can multiple return?
-              [obj | _] = LobstersNntp.LobstersMnesia.Story.read(id)
-              {article_number, obj}
+              [{head, body} | _] = LobstersNntp.LobstersMnesia.Story.read(id)
+                                   |> Enum.map(&LobstersNntp.MboxTransform.transform/1)
+              {article_number, head, body}
             {_, article_number, id, :comment} ->
               Logger.info("[WRK] Article number #{article_number} corresponds to comment #{id}")
-              [obj | _] = LobstersNntp.LobstersMnesia.Comment.read(id)
-              {article_number, obj}
+              [{head, body} | _] = LobstersNntp.LobstersMnesia.Comment.read(id)
+                                   |> Enum.map(&LobstersNntp.MboxTransform.transform/1)
+              {article_number, head, body}
           end)
       end
-      |> Enum.map(fn {article_number, object} -> LobstersNntp.MboxTransform.xover(object, article_number) end)
     end
-    {:reply, xovers, state}
+    {:reply, articles, state}
   end
 
   def handle_call({:article, :comment, id}, _pid, state) do
@@ -103,10 +77,7 @@ defmodule LobstersNntp.MboxWorker do
     {:reply, article, state}
   end
 
-  def xover({type, story_id}) when type in [:story, :comment], do: GenServer.call(__MODULE__, {:xover, type, story_id})
-  def xover({:article, article}), do: GenServer.call(__MODULE__, {:xover, :articles_from_to, article, article})
-  def xover({:articles_from, from}), do: GenServer.call(__MODULE__, {:xover, :articles_from_to, from, 2_147_483_647})
-  def xover({:articles_from_to, from, to}), do: GenServer.call(__MODULE__, {:xover, :articles_from_to, from, to})
-
   def article({type, id}) when type in [:story, :comment, :article], do: GenServer.call(__MODULE__, {:article, type, id})
+  def articles({:articles_from, id}), do: GenServer.call(__MODULE__, {:articles_from_to, id, 2_147_483_647})
+  def articles({:articles_from_to, from, to}), do: GenServer.call(__MODULE__, {:articles_from_to, from, to})
 end
