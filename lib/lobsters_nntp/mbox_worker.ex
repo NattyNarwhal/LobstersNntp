@@ -19,7 +19,23 @@ defmodule LobstersNntp.MboxWorker do
     {:ok, args}
   end
 
-  def handle_call({:articles_from_to, from, to}, _pid, state) do
+  defp transform_article_range({_, article_number, id, :story}, opts) do
+      Logger.info("[WRK] Article number #{article_number} corresponds to story #{id}")
+      {head, body} = LobstersNntp.LobstersMnesia.Story.read(id)
+                     |> Enum.map(fn x -> LobstersNntp.MboxTransform.transform(x, opts) end)
+                     |> List.first
+      {article_number, head, body}
+  end
+
+  defp transform_article_range({_, article_number, id, :comment}, opts) do
+      Logger.info("[WRK] Article number #{article_number} corresponds to comment #{id}")
+      {head, body} = LobstersNntp.LobstersMnesia.Comment.read(id)
+                     |> Enum.map(fn x -> LobstersNntp.MboxTransform.transform(x, opts) end)
+                     |> List.first
+      {article_number, head, body}
+  end
+
+  def handle_call({:articles_from_to, from, to, opts}, _pid, state) do
     Logger.info("[WRK] Begin ARTICLE from #{from} to #{to}")
     articles = Amnesia.transaction do
       case LobstersNntp.LobstersMnesia.Article.where(id >= from and id <= to) do
@@ -28,42 +44,31 @@ defmodule LobstersNntp.MboxWorker do
           []
         %Amnesia.Table.Select{values: articles} ->
           Logger.info("[WRK] Got #{Enum.count(articles)}")
-          Enum.map(articles, fn
-            {_, article_number, id, :story} ->
-              Logger.info("[WRK] Article number #{article_number} corresponds to story #{id}")
-              [{head, body} | _] = LobstersNntp.LobstersMnesia.Story.read(id)
-                                   |> Enum.map(&LobstersNntp.MboxTransform.transform/1)
-              {article_number, head, body}
-            {_, article_number, id, :comment} ->
-              Logger.info("[WRK] Article number #{article_number} corresponds to comment #{id}")
-              [{head, body} | _] = LobstersNntp.LobstersMnesia.Comment.read(id)
-                                   |> Enum.map(&LobstersNntp.MboxTransform.transform/1)
-              {article_number, head, body}
-          end)
+          Enum.map(articles, fn x -> transform_article_range(x, opts) end)
       end
     end
     {:reply, articles, state}
   end
 
-  def handle_call({:article, :comment, id}, _pid, state) do
+  def handle_call({:article, :comment, id, opts}, _pid, state) do
     Logger.info("[WRK] Begin ARTICLE for comment #{id}")
     [article | _] = Amnesia.transaction do
       LobstersNntp.LobstersMnesia.Comment.read(id)
-      |> Enum.map(&LobstersNntp.MboxTransform.transform/1)
+      |> Enum.map(fn x -> LobstersNntp.MboxTransform.transform(x, opts) end)
     end
     {:reply, article, state}
   end
 
-  def handle_call({:article, :story, id}, _pid, state) do
+  def handle_call({:article, :story, id, opts}, _pid, state) do
     Logger.info("[WRK] Begin ARTICLE for story #{id}")
     [article | _] = Amnesia.transaction do
       LobstersNntp.LobstersMnesia.Story.read(id)
-      |> Enum.map(&LobstersNntp.MboxTransform.transform/1)
+      |> Enum.map(fn x -> LobstersNntp.MboxTransform.transform(x, opts) end)
     end
     {:reply, article, state}
   end
 
-  def handle_call({:article, :article, id}, _pid, state) do
+  def handle_call({:article, :article, id, opts}, _pid, state) do
     Logger.info("[WRK] Begin ARTICLE for article number #{id}")
     [article | _] = Amnesia.transaction do
       returned_article = LobstersNntp.LobstersMnesia.Article.read(id)
@@ -72,12 +77,13 @@ defmodule LobstersNntp.MboxWorker do
         %LobstersNntp.LobstersMnesia.Article{} = article_obj ->
           LobstersNntp.LobstersMnesia.Article.get_original(article_obj)
       end
-      |> Enum.map(&LobstersNntp.MboxTransform.transform/1)
+      |> Enum.map(fn x -> LobstersNntp.MboxTransform.transform(x, opts) end)
     end
     {:reply, article, state}
   end
 
-  def article({type, id}) when type in [:story, :comment, :article], do: GenServer.call(__MODULE__, {:article, type, id})
-  def articles({:articles_from, id}), do: GenServer.call(__MODULE__, {:articles_from_to, id, 2_147_483_647})
-  def articles({:articles_from_to, from, to}), do: GenServer.call(__MODULE__, {:articles_from_to, from, to})
+  def article({type, id}, opts \\ %{}) when type in [:story, :comment, :article], do: GenServer.call(__MODULE__, {:article, type, id, opts})
+  def articles(range, opts \\ %{})
+  def articles({:articles_from, id}, opts), do: GenServer.call(__MODULE__, {:articles_from_to, id, 2_147_483_647, opts})
+  def articles({:articles_from_to, from, to}, opts), do: GenServer.call(__MODULE__, {:articles_from_to, from, to, opts})
 end

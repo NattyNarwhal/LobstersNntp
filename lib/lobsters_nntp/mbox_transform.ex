@@ -31,7 +31,9 @@ defmodule LobstersNntp.MboxTransform do
   defp qp_subject(subject) do
     [encoded] = :lobsters_nntp_mime.encode_quoted_printable(subject)
     # remove whitespace that can disrupt parsing
-    cleaned = String.replace(encoded, ~r{[\t\r\n]}, " ")
+    # the question mark at the end causes fun parsing issues
+    cleaned = String.replace(encoded, ~r{=?[\t\r\n]}, "")
+              |> String.replace("?", "=3F")
     # Use ?B? for Base64
     "=?UTF-8?Q?#{cleaned}?="
   end
@@ -41,9 +43,12 @@ defmodule LobstersNntp.MboxTransform do
     |> Enum.map(fn "." -> ".."; x -> x end)
   end
 
-  def html_to_encoded_text(html, strip_boundary) do
+  def html_to_encoded_text(html, strip_boundary \\ nil) do
     # XXX: hacky
-    without_boundary = String.replace(html, strip_boundary, "A" <> strip_boundary)
+    without_boundary = case strip_boundary do
+      nil -> html
+      _ -> String.replace(html, strip_boundary, "A" <> strip_boundary)
+    end
     # TODO: We should instead of stripping, do some parsing.
     # (Unless Peter gives us raw Markdown... hmmm...)
     stripped = HtmlSanitizeEx.strip_tags(without_boundary)
@@ -52,8 +57,11 @@ defmodule LobstersNntp.MboxTransform do
     encoded
   end
 
-  def html_to_encoded_html(html, strip_boundary) do
-    without_boundary = String.replace(html, strip_boundary, "A" <> strip_boundary)
+  def html_to_encoded_html(html, strip_boundary \\ nil) do
+    without_boundary = case strip_boundary do
+      nil -> html
+      _ -> String.replace(html, strip_boundary, "A" <> strip_boundary)
+    end
     [encoded] = :lobsters_nntp_mime.encode_quoted_printable(without_boundary)
     encoded
   end
@@ -101,15 +109,29 @@ defmodule LobstersNntp.MboxTransform do
     "\"#{username}\" <#{username}@#{Application.get_env(:lobsters_nntp, :domain)}>"
   end
 
-  defp encoding(:multipart), do: "multipart/alternative; boundary=__LobstersNntpBoundary"
-  defp encoding(:plain), do: "text/plain; charset=\"UTF-8\""
-  defp encoding(:html), do: "text/html; charset=\"UTF-8\""
+  defp encoding(:multipart) do
+    ["Content-Type: multipart/alternative; boundary=__LobstersNntpBoundary"]
+  end
+
+  defp encoding(:plain) do
+    [
+      "Content-Type: text/plain; charset=\"UTF-8\"",
+      "Content-Transfer-Encoding: quoted-printable"
+    ]
+  end
+
+  defp encoding(:html) do
+    [
+      "Content-Type: text/html; charset=\"UTF-8\"",
+      "Content-Transfer-Encoding: quoted-printable"
+    ]
+  end
 
   def create_headers(%LobstersNntp.LobstersMnesia.Story{} = story, options) do
     fake_newsgroups = story.tags
                       |> Enum.map(fn tag -> "lobsters.tag.#{tag}" end)
                       |> Enum.join(", ")
-    [
+    headers = [
       "Subject: #{subject(story)}",
       "From: #{from(story)}",
       "Date: #{date_format(story.created_at)}",
@@ -118,13 +140,13 @@ defmodule LobstersNntp.MboxTransform do
       "Path: lobsters!nntp",
       "X-Lobsters: \"https://#{Application.get_env(:lobsters_nntp, :domain)}/s/#{story.id}\"",
       "X-Lobsters-Karma: #{story.karma}",
-      "Content-Type: #{encoding(options.content_type)}"
-    ]
+    ] 
+    headers ++ encoding(options.content_type)
   end
 
   def create_headers(%LobstersNntp.LobstersMnesia.Comment{} = comment, options) do
     reference_id = reference(comment)
-    [
+    headers = [
       "Subject: #{subject(comment)}",
       "From: #{from(comment)}",
       "Date: #{date_format(comment.created_at)}",
@@ -134,19 +156,18 @@ defmodule LobstersNntp.MboxTransform do
       "Path: lobsters!nntp",
       "X-Lobsters: \"https://#{Application.get_env(:lobsters_nntp, :domain)}/c/#{comment.id}\"",
       "X-Lobsters-Karma: #{comment.karma}",
-      "Content-Type: #{encoding(options.content_type)}"
     ]
+    headers ++ encoding(options.content_type)
   end
 
   defp transform_text(html_text, options) do
-    # XXX: Should we be using QP for the non-multipart encodings?
     case options.content_type do
       :multipart ->
         multipart_from_html(html_text)
       :html ->
-        html_text
+        html_to_encoded_html(html_text)
       :plain ->
-        HtmlSanitizeEx.strip_tags(html_text)
+        html_to_encoded_text(html_text)
     end
     |> body_to_lines
   end

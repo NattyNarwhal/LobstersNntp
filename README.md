@@ -39,19 +39,25 @@ handle HTML news articles better.
 
 * Outlook Express: works
 * Mozilla (and likely modern Thunderbird): works
-* Netscape 4: works, doesn't auto-detect UTF-8 messages
-* Xnews: Message display erratic, doesn't support text/html (renders as plain)
+* Netscape 3 & 4: works, doesn't auto-detect UTF-8 messages
+* Xnews: Message display erratic, doesn't support text/html (renders as plain),
+  doesn't support Quoted-Printable subjects
 * Internet News (from Internet Explorer 3): messages blank
-* Agent: default text view shows 
+* Agent: works, displays text part of multipart fine, shows HTML as attachment
 * MicroPlanet Gravity: refuses to list the newsgroups
 
 Feel free to try more!
 
+## Available groups
+
+* `lobsters`: Multipart HTML/Plain UTF-8 QP
+* `lobsters.plain`: Plain UTF-8 QP
+
 ## Known issues
 
 * More DRY
-* Should offer plain text; probably use MIME to staple them together
 * Support non-XOVER commands for fetching headers
+* The plain text rendering sucks
 
 ## How does this work?
 

@@ -9,7 +9,12 @@ defmodule LobstersNntp.NntpSession do
   def init(socket) do
     Logger.info("[TCP] Initialized")
     send_line(socket, "200 ready")
-    {:ok, %{socket: socket, selected: nil}}
+    state = %{
+      socket: socket,
+      selected: nil,
+      content_type: :multipart
+    }
+    {:ok, state}
   end
 
   # NNTP protocol
@@ -35,21 +40,29 @@ defmodule LobstersNntp.NntpSession do
     {count, high, low}
   end
 
-  defp nntp_list(socket, state) do
-    send_line(socket, "215 Try the lobster")
+  defp nntp_list(socket, state, type \\ :active) do
+    case type do
+      :new ->
+        send_line(socket, "231 All groups have same content but different format")
+      _ ->
+        send_line(socket, "215 All groups have same content but different format")
+    end
     # Return format is group.name high low posting_allowed (y/n/m)
     {count, high, low} = water_marks()
     send_line(socket, "lobsters #{count} #{low} #{high} n");
+    send_line(socket, "lobsters.plain #{count} #{low} #{high} n");
     send_line(socket, ".")
     state
   end
 
   defp calculate_range("<c_" <> rest) do
-    {:comment, String.replace_suffix(rest, "@#{Application.get_env(:lobsters_nntp, :domain)}>", "")}
+    [id | _] = String.split(rest, "@")
+    {:comment, id}
   end
 
   defp calculate_range("<s_" <> rest) do
-    {:story, String.replace_suffix(rest, "@#{Application.get_env(:lobsters_nntp, :domain)}>", "")}
+    [id | _] = String.split(rest, "@")
+    {:story, id}
   end
 
   defp calculate_range(rest) do
@@ -86,8 +99,8 @@ defmodule LobstersNntp.NntpSession do
     ] |> Enum.join("\t")
   end
 
-  defp nntp_xover_range(socket, xover_arg) do
-    case LobstersNntp.MboxWorker.articles(xover_arg) do
+  defp nntp_xover_range(socket, xover_arg, client_opts) do
+    case LobstersNntp.MboxWorker.articles(xover_arg, client_opts) do
       nil ->
         send_line(socket, "423 Not in range")
       articles ->
@@ -100,10 +113,13 @@ defmodule LobstersNntp.NntpSession do
   end
 
   defp nntp_xover(socket, state, range) do
+    client_opts = %{
+      content_type: state.content_type
+    }
     # 412 if !selected (only if range isn't an article id)
     case calculate_range(range) do
       {type, _id} = xover_arg when type in [:story, :comment] ->
-        case LobstersNntp.MboxWorker.article(xover_arg) do
+        case LobstersNntp.MboxWorker.article(xover_arg, client_opts) do
           nil ->
             send_line(socket, "430 No such comment")
           {head, body} ->
@@ -112,11 +128,11 @@ defmodule LobstersNntp.NntpSession do
             send_line(socket, ".")
         end
       {:article, article} ->
-        nntp_xover_range(socket, {:articles_from_to, article, article})
+        nntp_xover_range(socket, {:articles_from_to, article, article}, client_opts)
       {:articles_from, _from} = xover_arg ->
-        nntp_xover_range(socket, xover_arg)
+        nntp_xover_range(socket, xover_arg, client_opts)
       {:articles_from_to, _from, _to} = xover_arg ->
-        nntp_xover_range(socket, xover_arg)
+        nntp_xover_range(socket, xover_arg, client_opts)
       _ ->
         send_line(socket, "501 Invalid range")
     end
@@ -125,11 +141,14 @@ defmodule LobstersNntp.NntpSession do
 
   defp nntp_article(socket, state, article, parts) do
     args = calculate_range(article)
+    client_opts = %{
+      content_type: state.content_type
+    }
     result = case args do
       {type, _id} when type in [:story, :comment] ->
-        LobstersNntp.MboxWorker.article(args)
+        LobstersNntp.MboxWorker.article(args, client_opts)
       {:article, _article} ->
-        LobstersNntp.MboxWorker.article(args)
+        LobstersNntp.MboxWorker.article(args, client_opts)
       _ ->
         :error
     end
@@ -173,6 +192,25 @@ defmodule LobstersNntp.NntpSession do
     end
   end
 
+  defp nntp_group(socket, state, group) do
+    {count, high, low} = water_marks()
+    case group do
+      "lobsters" ->
+        send_line(socket, "211 #{count} #{low} #{high} lobsters")
+        state
+        |> Map.put(:selected, :lobsters)
+        |> Map.put(:content_type, :multipart)
+      "lobsters.plain" ->
+        send_line(socket, "211 #{count} #{low} #{high} lobsters.plain")
+        state
+        |> Map.put(:selected, :lobsters)
+        |> Map.put(:content_type, :plain)
+      _ ->
+        send_line(socket, "411 Only use lobsters")
+        state
+    end
+  end
+
   # TCP
   defp send_line(socket, line) do
     Logger.info("[S] " <> line)
@@ -207,16 +245,9 @@ defmodule LobstersNntp.NntpSession do
         {:noreply, nntp_list(socket, state)}
       "NEWGROUPS " <> _newgroups_args ->
         # not right, but it doesn't matter
-        {:noreply, nntp_list(socket, state)}
-      "GROUP lobsters" ->
-        new_state = state
-                    |> Map.put(:selected, :lobsters)
-        {count, high, low} = water_marks()
-        send_line(socket, "211 #{count} #{low} #{high} lobsters")
-        {:noreply, new_state}
-      "GROUP " <> _group ->
-        send_line(socket, "411 Only use lobsters")
-        {:noreply, state}
+        {:noreply, nntp_list(socket, state, :new)}
+      "GROUP " <> group ->
+        {:noreply, nntp_group(socket, state, group)}
       "QUIT" ->
         Logger.info("[TCP] Exiting from QUIT")
         send_line(socket, "205 bye")
