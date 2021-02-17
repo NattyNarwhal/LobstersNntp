@@ -56,7 +56,6 @@ Feel free to try more!
 ## Known issues
 
 * More DRY
-* Support non-XOVER commands for fetching headers
 * The plain text rendering sucks
 
 ## How does this work?
