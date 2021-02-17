@@ -18,18 +18,31 @@ defmodule LobstersNntp.NntpSession do
   end
 
   # NNTP protocol
-  defp extract_header_items(headers, header) do
-    headers
-    |> Enum.filter(fn x -> String.starts_with?(x, header) end)
-    |> Enum.map(fn x -> String.replace_prefix(x, header <> ": ", "") end)
+  defp extract_header_items(headers, header, body \\ []) do
+    # XHDR and friends can use upper/lower case for references. It's annoying!
+    # Agent sometimes uses the metadata ones w/o the leading colon
+    case String.upcase(header) do
+      lines when lines in ["LINES", ":LINES"] ->
+        Enum.count(body)
+      bytes when bytes in ["BYTES", ":BYTES"] ->
+        body_text = Enum.join(body, "\r\n")
+        byte_size(body_text)
+      wanted_type ->
+        headers
+        |> Enum.map(fn x -> String.split(x, ": ", parts: 2) end)
+        |> Enum.filter(fn [type, _value] -> String.upcase(type) == wanted_type end)
+        |> Enum.map(fn [_type, value] -> value end)
+    end
   end
 
-  defp extract_header_item(headers, header) do
-    case extract_header_items(headers, header) do
+  defp extract_header_item(headers, header, body \\ []) do
+    case extract_header_items(headers, header, body) do
       [] ->
         nil
       [first | _] when is_binary(first) ->
         first
+      metadata ->
+        metadata
     end
   end
 
@@ -82,37 +95,45 @@ defmodule LobstersNntp.NntpSession do
     end
   end
 
+  defp nntp_xover_message(:xover), do: "224"
+  defp nntp_xover_message(_), do: "225"
+
   # art_num|subj|from|date|id|ref|bytes|lines
-  defp nntp_xover_item({article_number, head, body}) do
+  defp nntp_xover_item({article_number, head, body}, field) do
     body_text = Enum.join(body, "\r\n")
     lines = Enum.count(body)
     bytes = byte_size(body_text)
-    [
-      "#{article_number}",
-      "#{extract_header_item(head, "Subject")}",
-      "#{extract_header_item(head, "From")}",
-      "#{extract_header_item(head, "Date")}",
-      "#{extract_header_item(head, "Message-ID")}",
-      "#{extract_header_item(head, "References")}",
-      "#{bytes}",
-      "#{lines}"
-    ] |> Enum.join("\t")
+    case field do
+      :xover ->
+        [
+          "#{article_number}",
+          "#{extract_header_item(head, "Subject")}",
+          "#{extract_header_item(head, "From")}",
+          "#{extract_header_item(head, "Date")}",
+          "#{extract_header_item(head, "Message-ID")}",
+          "#{extract_header_item(head, "References")}",
+          "#{bytes}",
+          "#{lines}"
+        ] |> Enum.join("\t")
+      header when is_binary(header) ->
+        "#{article_number} #{extract_header_item(head, header)}"
+    end
   end
 
-  defp nntp_xover_range(socket, xover_arg, client_opts) do
+  defp nntp_xover_range(socket, xover_arg, field, client_opts) do
     case LobstersNntp.MboxWorker.articles(xover_arg, client_opts) do
       nil ->
         send_line(socket, "423 Not in range")
       articles ->
-        send_line(socket, "224 Overview follows")
+        send_line(socket, nntp_xover_message(field) <> " Overview follows")
         articles
-        |> Enum.map(&nntp_xover_item/1)
+        |> Enum.map(fn article -> nntp_xover_item(article, field) end)
         |> Enum.map(fn line -> send_line(socket, line) end)
         send_line(socket, ".")
     end
   end
 
-  defp nntp_xover(socket, state, range) do
+  defp nntp_xover(socket, state, range, field \\ :xover) do
     client_opts = %{
       content_type: state.content_type
     }
@@ -123,20 +144,34 @@ defmodule LobstersNntp.NntpSession do
           nil ->
             send_line(socket, "430 No such comment")
           {head, body} ->
-            send_line(socket, "224 Overview follows")
-            send_line(socket, nntp_xover_item({0, head, body}))
+            send_line(socket, nntp_xover_message(field) <> " Overview follows")
+            send_line(socket, nntp_xover_item({0, head, body}, field))
             send_line(socket, ".")
         end
       {:article, article} ->
-        nntp_xover_range(socket, {:articles_from_to, article, article}, client_opts)
+        nntp_xover_range(socket, {:articles_from_to, article, article}, field, client_opts)
       {:articles_from, _from} = xover_arg ->
-        nntp_xover_range(socket, xover_arg, client_opts)
+        nntp_xover_range(socket, xover_arg, field, client_opts)
       {:articles_from_to, _from, _to} = xover_arg ->
-        nntp_xover_range(socket, xover_arg, client_opts)
+        nntp_xover_range(socket, xover_arg, field, client_opts)
       _ ->
         send_line(socket, "501 Invalid range")
     end
     state
+  end
+
+  defp nntp_xhdr(socket, state, args) do
+    case String.split(args, " ") do
+      [field, range] ->
+        nntp_xover(socket, state, range, field)
+      [_field] ->
+        # XXX: Grab state.selected_article
+        send_line(socket, "501 XHDR on current article not supported")
+        state
+      _ ->
+        send_line(socket, "501 Invalid arguments for XHDR")
+        state
+    end
   end
 
   defp nntp_article(socket, state, article, parts) do
@@ -233,6 +268,10 @@ defmodule LobstersNntp.NntpSession do
         {:noreply, nntp_xover(socket, state, range)}
       "OVER " <> range ->
         {:noreply, nntp_xover(socket, state, range)}
+      "XHDR " <> args ->
+        {:noreply, nntp_xhdr(socket, state, args)}
+      "HDR " <> args ->
+        {:noreply, nntp_xhdr(socket, state, args)}
       "ARTICLE " <> article ->
         {:noreply, nntp_article(socket, state, article, :article)}
       "HEAD " <> article ->
