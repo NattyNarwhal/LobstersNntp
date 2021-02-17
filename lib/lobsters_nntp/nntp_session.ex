@@ -260,6 +260,11 @@ defmodule LobstersNntp.NntpSession do
     return
   end
 
+  def handle_info({:tcp_error, _socket, error}, _state) do
+    Logger.info("[TCP] Exiting from socket error (#{error})")
+    Process.exit(self(), :normal)
+  end
+
   def handle_info({:tcp_closed, _socket}, _state) do
     Logger.info("[TCP] Exiting from socket close")
     Process.exit(self(), :normal)
